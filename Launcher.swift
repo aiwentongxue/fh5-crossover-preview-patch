@@ -58,9 +58,9 @@ func run() throws {
     }
     let alert = NSAlert()
     alert.messageText = "地平线 5 · CrossOver Preview 补丁"
-    alert.informativeText = "选择安装了 Steam 和《地平线 5》的容器。启动前请退出 Windows 版 Steam。"
+    alert.informativeText = "选择安装了 Steam 和《地平线 5》的容器。安装前请退出 Windows 版 Steam。安装完成后可从 CrossOver Preview 打开 Steam。"
     alert.accessoryView = selector
-    alert.addButton(withTitle: "打补丁并启动")
+    alert.addButton(withTitle: "安装补丁")
     alert.addButton(withTitle: "取消")
     alert.addButton(withTitle: "恢复原始 DLL")
     let response = alert.runModal()
@@ -72,15 +72,6 @@ func run() throws {
     if response == .alertThirdButtonReturn {
         args += ["restore", bottle.path]
     } else {
-        let candidates = Array(Set(steamCandidates(bottle)))
-        let steam: URL
-        if candidates.count == 1 {
-            steam = candidates[0]
-        } else {
-            guard let selected = choose("选择 Steam 安装目录里的 steam.exe", extension: "exe", directory: candidates.first?.deletingLastPathComponent()),
-                  selected.lastPathComponent.lowercased() == "steam.exe" else { return }
-            steam = selected
-        }
         let defaultPreview = URL(fileURLWithPath: "/Applications/CrossOver Preview.app")
         let preview: URL
         if fm.fileExists(atPath: defaultPreview.path) {
@@ -89,7 +80,7 @@ func run() throws {
             guard let selected = choose("选择 CrossOver Preview.app", extension: "app", directory: defaultPreview.deletingLastPathComponent()) else { return }
             preview = selected
         }
-        args += ["launch", bottle.path, steam.path, preview.path]
+        args += ["install", bottle.path, "", preview.path]
     }
 
     try fm.createDirectory(at: support, withIntermediateDirectories: true)
@@ -103,14 +94,15 @@ func run() throws {
     task.standardOutput = handle
     task.standardError = handle
     try task.run()
-    let deadline = Date().addingTimeInterval(3)
-    while task.isRunning && Date() < deadline {
+    while task.isRunning {
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
     }
-    if !task.isRunning && task.terminationStatus != 0 {
+    if task.terminationStatus != 0 {
         message("操作未完成", (try? String(contentsOf: log, encoding: .utf8)) ?? log.path)
     } else if response == .alertThirdButtonReturn {
         message("已恢复原始 DLL", bottle.lastPathComponent)
+    } else {
+        message("已安装补丁", "现在可在 CrossOver Preview 中打开此容器的 Steam，再从游戏库启动《地平线 5》。")
     }
 }
 

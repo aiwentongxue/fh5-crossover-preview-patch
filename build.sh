@@ -20,8 +20,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>FH5Patch</string>
 <key>CFBundleName</key><string>地平线5补丁</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.1.2</string>
-<key>CFBundleVersion</key><string>4</string>
+<key>CFBundleShortVersionString</key><string>1.2.0</string>
+<key>CFBundleVersion</key><string>5</string>
 <key>LSMinimumSystemVersion</key><string>27.0</string>
 </dict></plist>
 PLIST
@@ -36,7 +36,7 @@ command_dir="$package/终端版"
 mkdir -p "$command_dir"
 cp ./*.command patch.sh prepare-alias.pl find-steam.sh "$resources/d3d12.dll" "$command_dir/"
 
-archive=FH5-CrossOver-Preview-Patch-Combined-1.1.2.zip
+archive=FH5-CrossOver-Preview-Patch-Combined-1.2.0.zip
 ditto -c -k --keepParent "$package" "$stage/$archive"
 mv -f "$stage/$archive" "$out/$archive"
 printf '%s\n' "$out/$archive"

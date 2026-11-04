@@ -18,7 +18,7 @@ key="$(printf '%s' "$bottle" | /usr/bin/shasum -a 256 | cut -c1-24)"
 state="$HOME/Library/Application Support/FH5 Preview Patch/$key"
 
 [[ -f "$bottle/cxbottle.conf" && -d "${target%/*}" ]] || fail "请选择有效的 CrossOver 容器。"
-[[ "$action" == launch || "$action" == restore ]] || fail "未知操作。"
+[[ "$action" == launch || "$action" == install || "$action" == restore ]] || fail "未知操作。"
 mkdir -p "$state"
 mkdir "$state/lock" 2>/dev/null || fail "此容器已有补丁工具任务在运行。"
 trap 'rmdir "$state/lock"' EXIT
@@ -46,15 +46,50 @@ is_known_patch() {
     esac
 }
 
+config="$bottle/cxbottle.conf"
+registry_key='HKCU\Software\Wine\AppDefaults\ForzaHorizon5.exe\DllOverrides'
+settings="$state/manual-launch"
+wine_reg() {
+    "$cx/bin/wine" --bottle "$name" --no-update reg.exe "$@"
+}
+set_manual_environment() {
+    local temp
+    temp="$(mktemp "${config}.fh5.XXXXXX")"
+    cp -p "$config" "$temp"
+    FH5_REAL="$1" /usr/bin/perl -ne '
+        $in_env = /^\[EnvironmentVariables\]\s*$/i if /^\[/;
+        next if $in_env && /^;; FH5 Preview Patch\s*$/ && ++$skip;
+        if ($skip) { $skip = 0; next if /^"HB_D3D12_REAL"\s*=/; }
+        print;
+        if ($in_env && /^\[/ && length $ENV{FH5_REAL}) {
+            my $path = $ENV{FH5_REAL};
+            $path =~ s/([\\"])/\\$1/g;
+            print qq{;; FH5 Preview Patch\n"HB_D3D12_REAL" = "$path"\n};
+        }
+    ' "$config" > "$temp"
+    mv -f "$temp" "$config"
+}
+
 backup="$state/d3d12.original.dll"
 if [[ "$action" == restore ]]; then
     [[ -f "$backup" ]] || fail "此容器没有本工具创建的备份。"
+    if ! cmp -s "$target" "$backup"; then
+        [[ -f "$target" && ! -L "$target" ]] && is_known_patch ||
+            fail "当前 DLL 无法识别。备份仍在 $state。"
+    fi
+    if [[ -f "$settings" ]]; then
+        IFS= read -r app < "$settings"
+        cx="$app/Contents/SharedSupport/CrossOver"
+        if wine_reg query "$registry_key" /v d3d12 2>/dev/null | grep -Eqi 'REG_SZ[[:space:]]+native,builtin'; then
+            wine_reg delete "$registry_key" /v d3d12 /f
+        fi
+        set_manual_environment ""
+        rm "$settings"
+    fi
     if cmp -s "$target" "$backup"; then
         printf '%s\n' "原始 D3D12 文件已在容器中。"
         exit
     fi
-    [[ -f "$target" && ! -L "$target" ]] && is_known_patch ||
-        fail "当前 DLL 无法识别。备份仍在 $state。"
     replace_dll "$backup"
     printf '%s\n' "已恢复原始 D3D12 文件。"
     exit
@@ -66,16 +101,30 @@ fi
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" == 27.0.0.41073 ]] || fail "本包仅适配 CrossOver Preview 构建 27.0.0.41073。"
 awk '/^[[:space:]]*"Preview"[[:space:]]*=[[:space:]]*"1"/ { found=1 } END { exit !found }' "$bottle/cxbottle.conf" ||
     fail "请在 CrossOver Preview 中启用这个容器。"
-[[ "${steam##*/}" == [Ss][Tt][Ee][Aa][Mm].[Ee][Xx][Ee] && -f "$steam" ]] ||
-    fail "请选择 Windows Steam 的 steam.exe。"
-[[ "$(/usr/bin/file -bL "$steam")" == PE32* ]] ||
-    fail "所选文件不是 Windows 可执行程序。请选择 Steam 安装目录中的 steam.exe。"
+if [[ "$action" == launch ]]; then
+    [[ "${steam##*/}" == [Ss][Tt][Ee][Aa][Mm].[Ee][Xx][Ee] && -f "$steam" ]] ||
+        fail "请选择 Windows Steam 的 steam.exe。"
+    [[ "$(/usr/bin/file -bL "$steam")" == PE32* ]] ||
+        fail "所选文件不是 Windows 可执行程序。请选择 Steam 安装目录中的 steam.exe。"
+fi
 [[ -f "$target" && ! -L "$target" && -f "$shim" ]] || fail "缺少可补丁的 D3D12 DLL。"
 stock="$metal/x86_64-windows/d3d12.dll"
 [[ -f "$stock" && -f "$metal/x86_64-unix/d3d12.so" ]] || fail "Preview 缺少 D3DMetal 4 运行文件。"
 [[ "$(/usr/bin/shasum -a 256 "$stock" | cut -d' ' -f1)" == 1e19c9e72d3e835240690035b32b3f64919191e93a428e6f850ad711a3de564d ]] ||
     fail "D3DMetal 文件与本补丁验证的版本不同。"
 [[ "$state$metal$wine_lib" != *"'"* && "$state$metal$wine_lib" != *:* ]] || fail "补丁路径或 Preview 路径含单引号或冒号，请移至其他位置。"
+
+if [[ "$action" == install ]]; then
+    grep -qi '^"CX_GRAPHICS_BACKEND"[[:space:]]*=[[:space:]]*"d3dmetal"' "$config" ||
+        fail "请在 CrossOver Preview 中先将容器的图形后端设为 D3DMetal。"
+    grep -qi '^\[EnvironmentVariables\]' "$config" || fail "容器缺少环境设置。"
+    if [[ ! -f "$settings" ]]; then
+        if grep -qi '^"HB_D3D12_REAL"[[:space:]]*=' "$config" ||
+           wine_reg query "$registry_key" /v d3d12 >/dev/null 2>&1; then
+            fail "容器已有手动设置的 FH5 D3D12 配置。"
+        fi
+    fi
+fi
 
 mkdir -p "$state/x86_64-windows" "$state/x86_64-unix"
 alias_dll="$state/x86_64-windows/apd12.dll"
@@ -95,6 +144,17 @@ else
         mv -f "$backup.tmp" "$backup"
     fi
     replace_dll "$shim"
+fi
+
+if [[ "$action" == install ]]; then
+    if [[ ! -f "$settings" ]]; then
+        printf '%s\n' "$app" > "$settings"
+    fi
+    wine_reg add "$registry_key" /v d3d12 /t REG_SZ /d native,builtin /f
+    real_stock="$(printf 'Z:%s' "$stock" | tr '/' '\\')"
+    set_manual_environment "$real_stock"
+    printf '%s\n' "补丁已安装。现在可在 CrossOver Preview 打开 Steam 并启动地平线 5。"
+    exit
 fi
 
 real_d3d12="$(printf 'Z:%s' "$alias_dll" | tr '/' '\\')"
